@@ -1,0 +1,14 @@
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\stream_buffer.c
+tickless_verification_l476rg\stream_buffer.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+tickless_verification_l476rg\stream_buffer.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\include\FreeRTOS.h
+tickless_verification_l476rg\stream_buffer.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stddef.h
+tickless_verification_l476rg\stream_buffer.o: ../Inc/FreeRTOSConfig.h
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\include\projdefs.h
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\include\portable.h
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\include\deprecated_definitions.h
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\portable\RVDS\ARM_CM4F\portmacro.h
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\include\mpu_wrappers.h
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\include\task.h
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\include\list.h
+tickless_verification_l476rg\stream_buffer.o: ..\FreeRTOS\Source\include\stream_buffer.h

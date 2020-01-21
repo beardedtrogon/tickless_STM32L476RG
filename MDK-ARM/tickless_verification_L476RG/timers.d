@@ -1,0 +1,15 @@
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\timers.c
+tickless_verification_l476rg\timers.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\include\FreeRTOS.h
+tickless_verification_l476rg\timers.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stddef.h
+tickless_verification_l476rg\timers.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+tickless_verification_l476rg\timers.o: ../Inc/FreeRTOSConfig.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\include\projdefs.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\include\portable.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\include\deprecated_definitions.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\portable\RVDS\ARM_CM4F\portmacro.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\include\mpu_wrappers.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\include\task.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\include\list.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\include\queue.h
+tickless_verification_l476rg\timers.o: ..\FreeRTOS\Source\include\timers.h
