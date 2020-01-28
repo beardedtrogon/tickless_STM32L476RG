@@ -1,0 +1,99 @@
+From 60554ec7e4b4a578ed3980dc93c52a819e605b30 Mon Sep 17 00:00:00 2001
+From: Vikas Manocha <vikas.manocha@st.com>
+Date: Fri, 24 Jan 2020 15:57:10 -0800
+Subject: [PATCH] reset Lptimer before overflow just before entering low power
+ mode
+
+If Low power timer counter(16 bit) has to cross 0xFFFF to match the compare
+value, then low power mode duration is not for the intended time duration &
+exit from it does not provide the correct value of Timer counter. This patch
+reset the timer counter before its overflow.
+
+e.g.
+working case:
+current counter value = 0x20
+compare value = 0x100
+Autoreload value = 0xFFFF
+Entry->exit to stop mode works fine.
+
+Non-working condition:
+Current timer counter value = 0xFF00
+Compare value = 0x100
+AutoRelaod value  = 0xFFFF.
+
+Entry->exit to stop mode : Timer counter does not provides the correct value.
+
+Signed-off-by: Vikas Manocha <vikas.manocha@st.com>
+---
+ Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_ll_lptim.h |  4 ++++
+ Src/test_application.c                                | 19 ++++++++++++++++---
+ 2 files changed, 20 insertions(+), 3 deletions(-)
+ mode change 100644 => 100755 Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_ll_lptim.h
+ mode change 100644 => 100755 Src/test_application.c
+
+diff --git a/Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_ll_lptim.h b/Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_ll_lptim.h
+old mode 100644
+new mode 100755
+index 8a3e87f..0f36860
+--- a/Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_ll_lptim.h
++++ b/Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_ll_lptim.h
+@@ -363,6 +363,10 @@ __STATIC_INLINE void LL_LPTIM_Enable(LPTIM_TypeDef *LPTIMx)
+   SET_BIT(LPTIMx->CR, LPTIM_CR_ENABLE);
+ }
+ 
++__STATIC_INLINE void LL_LPTIM_Disable_VM(LPTIM_TypeDef *LPTIMx)
++{
++  CLEAR_BIT(LPTIMx->CR, LPTIM_CR_ENABLE);
++}
+ /**
+   * @brief  Indicates whether the LPTIM instance is enabled.
+   * @rmtoll CR           ENABLE        LL_LPTIM_IsEnabled
+diff --git a/Src/test_application.c b/Src/test_application.c
+old mode 100644
+new mode 100755
+index f1dc622..043969e
+--- a/Src/test_application.c
++++ b/Src/test_application.c
+@@ -215,14 +215,18 @@ void vPortSetupTimerInterrupt( void )
+     
+     LL_LPTIM_ClearFlag_CMPOK(LPTIM2);
+ 
++
+     //Do both of these on the same side of "Enable"
+     LL_LPTIM_SetCompare( LPTIM2, pending_match_val );
+     LL_LPTIM_SetAutoReload(LPTIM2, auto_reload_value);
+-    
++
+     /* LPTIM2_IRQn interrupt configuration, with lowest priority possible */
+     HAL_NVIC_SetPriority(LPTIM2_IRQn, ((1 << configPRIO_BITS) - 1) , 0);
+     HAL_NVIC_EnableIRQ(LPTIM2_IRQn);
+-
++    /*Freeze LPTIMER when debugger halts: just for testing */
++#define DBGMCU_APB1FZR2	0xE004200C
++#define DBG_LPTIM2_STOP	1 << 5
++    *(volatile int *)(DBGMCU_APB1FZR2) = DBG_LPTIM2_STOP;
+     //Start the count
+     LL_LPTIM_StartCounter(LPTIM2, LL_LPTIM_OPERATING_MODE_CONTINUOUS);
+ }
+@@ -284,8 +288,17 @@ void vPortSuppressTicksAndSleep( TickType_t xExpectedIdleTime )
+     /* Set next compare match value to be "Expected Idle" LPTIM counts away from the
+        past compare match value. */
+     temp_match_val = last_match_val + expected_idle_counts;
++    if(temp_match_val < last_match_val) {
++	    /* disable-> enable LPtimer to reset counter */
++	    LL_LPTIM_Disable_VM(LPTIM2);
++	    LL_LPTIM_Enable(LPTIM2);
++	    set_compare_match(expected_idle_counts);
++	    LL_LPTIM_StartCounter(LPTIM2, LL_LPTIM_OPERATING_MODE_CONTINUOUS);
++	    temp_match_val = expected_idle_counts;
++    }
++    else
++	    set_compare_match(temp_match_val);
+ 
+-    set_compare_match(temp_match_val);
+     //LL_LPTIM_SetCompare( LPTIM2, temp_match_val );
+     now_debug = get_lptim_value();
+     
+-- 
+2.7.4
+

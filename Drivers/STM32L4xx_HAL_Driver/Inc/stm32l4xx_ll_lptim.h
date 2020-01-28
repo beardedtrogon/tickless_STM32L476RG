@@ -363,6 +363,10 @@ __STATIC_INLINE void LL_LPTIM_Enable(LPTIM_TypeDef *LPTIMx)
   SET_BIT(LPTIMx->CR, LPTIM_CR_ENABLE);
 }
 
+__STATIC_INLINE void LL_LPTIM_Disable_VM(LPTIM_TypeDef *LPTIMx)
+{
+  CLEAR_BIT(LPTIMx->CR, LPTIM_CR_ENABLE);
+}
 /**
   * @brief  Indicates whether the LPTIM instance is enabled.
   * @rmtoll CR           ENABLE        LL_LPTIM_IsEnabled

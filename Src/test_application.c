@@ -145,6 +145,9 @@ static void set_compare_match(uint16_t match_val)
 
 void LPTIM2_IRQHandler(void)
 {   
+    LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_1);
+    LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_1);
+    
     // ENC_B_MCU
     LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_1);
     
@@ -171,8 +174,8 @@ void LPTIM2_IRQHandler(void)
     LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_1);
     
     // Check if next and past compare values are 32 ticks apart
-    assert(DIFF(pending_match_val, last_match_val) == 32);
-    assert((pending_match_val % 0x20) == 0);
+    assert(DIFF(pending_match_val, last_match_val) == 0x1000);
+    //assert((pending_match_val % 0x20) == 0);
 }
 
 // Override the timer setup in FreeRTOS port.c (by enabling
@@ -201,203 +204,217 @@ void vPortSetupTimerInterrupt( void )
     input_clock_rate = LL_RCC_GetLPTIMClockFreq(LL_RCC_LPTIM2_CLKSOURCE);
     
     /* Calculate the number of LPTIM2 Counts per FreeRTOS tick */
-    ulTimerCountsForOneTick = (input_clock_rate / configTICK_RATE_HZ);
+    //ulTimerCountsForOneTick = (input_clock_rate / configTICK_RATE_HZ);
+    ulTimerCountsForOneTick = 0x1000;
     
     assert(get_lptim_value() == 0);
-    assert(ulTimerCountsForOneTick == 32);
+    assert(ulTimerCountsForOneTick == 0x1000);
     last_match_val = 0;
-    pending_match_val = ulTimerCountsForOneTick;
+    pending_match_val = ulTimerCountsForOneTick + 0x5;
     
     // Check if next and past compare values are 32 ticks apart
-    assert(DIFF(pending_match_val, last_match_val) == 32);
+    //assert(DIFF(pending_match_val, last_match_val) == 0x100);
 
     LL_LPTIM_Enable(LPTIM2);
     
     LL_LPTIM_ClearFlag_CMPOK(LPTIM2);
 
+
     //Do both of these on the same side of "Enable"
     LL_LPTIM_SetCompare( LPTIM2, pending_match_val );
     LL_LPTIM_SetAutoReload(LPTIM2, auto_reload_value);
-    
+
     /* LPTIM2_IRQn interrupt configuration, with lowest priority possible */
     HAL_NVIC_SetPriority(LPTIM2_IRQn, ((1 << configPRIO_BITS) - 1) , 0);
     HAL_NVIC_EnableIRQ(LPTIM2_IRQn);
-
+    /*Freeze LPTIMER when debugger halts: just for testing */
+#define DBGMCU_APB1FZR2	0xE004200C
+#define DBG_LPTIM2_STOP	1 << 5
+    *(volatile int *)(DBGMCU_APB1FZR2) = DBG_LPTIM2_STOP;
     //Start the count
     LL_LPTIM_StartCounter(LPTIM2, LL_LPTIM_OPERATING_MODE_CONTINUOUS);
 }
 
-void vPortSuppressTicksAndSleep( TickType_t xExpectedIdleTime )
-{       
-    // nCS_ACCEL
-    LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_5);
-    
-    /* 2047 ticks x 32 = 65504. This is equivalent to 0xFFE0, or the largest
-       tick count that's a multiple of 32 before the LPTIM2 Autoreload occurs. */
-    if (xExpectedIdleTime > 2047)
-    {
-        xExpectedIdleTime = 2047;
-    }
-    
-    /* Calculate the number of LPTIM2 counts from the number of FreeRTOS ticks*/
-    expected_idle_counts = xExpectedIdleTime * ulTimerCountsForOneTick;
-    
-    /* Enter a critical section but don't use the taskENTER_CRITICAL()
-    method as that will mask interrupts that should exit sleep mode. */
-    __disable_irq();
-    __dsb( portSY_FULL_READ_WRITE );
-    __isb( portSY_FULL_READ_WRITE );
+//void vPortSuppressTicksAndSleep( TickType_t xExpectedIdleTime )
+//{       
+//    // nCS_ACCEL
+//    LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_5);
+//    
+//    /* 2047 ticks x 32 = 65504. This is equivalent to 0xFFE0, or the largest
+//       tick count that's a multiple of 32 before the LPTIM2 Autoreload occurs. */
+//    if (xExpectedIdleTime > 2047)
+//    {
+//        xExpectedIdleTime = 2047;
+//    }
+//    
+//    /* Calculate the number of LPTIM2 counts from the number of FreeRTOS ticks*/
+//    expected_idle_counts = xExpectedIdleTime * ulTimerCountsForOneTick;
+//    
+//    /* Enter a critical section but don't use the taskENTER_CRITICAL()
+//    method as that will mask interrupts that should exit sleep mode. */
+//    __disable_irq();
+//    __dsb( portSY_FULL_READ_WRITE );
+//    __isb( portSY_FULL_READ_WRITE );
 
-    /* If a context switch is pending or a task is waiting for the scheduler
-    to be unsuspended then abandon the low power entry. */
-    if( eTaskConfirmSleepModeStatus() == eAbortSleep )
-    {
-        /* Re-enable interrupts - see comments above __disable_irq() call
-        above. */
-        __enable_irq();
-        
-        // Check if next and past compare values are 32 ticks apart
-        assert(DIFF(pending_match_val, last_match_val) == 32);
-        return;
-    }
- 
-    // Confirm that the compare value set matches the value in pending_match_val
-    assert(LL_LPTIM_GetCompare(LPTIM2) == pending_match_val);
-    assert((pending_match_val % 0x20) == 0);
-    
-    // Get initial LPTIM value as we enter vPortSuppressTicksAndSleep
-    vPSTAS_start = get_lptim_value();
-    
-    // Too close to pending compare match interrupt. Exit vPortSuppressTicksAndSleep    
-    if( DIFF(pending_match_val, vPSTAS_start) <= 5)
-    {
-        __force_stores();
-        __WFI();
-        __enable_irq();
-        LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_5);
+//    /* If a context switch is pending or a task is waiting for the scheduler
+//    to be unsuspended then abandon the low power entry. */
+//    if( eTaskConfirmSleepModeStatus() == eAbortSleep )
+//    {
+//        /* Re-enable interrupts - see comments above __disable_irq() call
+//        above. */
+//        __enable_irq();
+//        
+//        // Check if next and past compare values are 32 ticks apart
+//        assert(DIFF(pending_match_val, last_match_val) == 32);
+//        return;
+//    }
+// 
+//    // Confirm that the compare value set matches the value in pending_match_val
+//    assert(LL_LPTIM_GetCompare(LPTIM2) == pending_match_val);
+//    assert((pending_match_val % 0x20) == 0);
+//    
+//    // Get initial LPTIM value as we enter vPortSuppressTicksAndSleep
+//    vPSTAS_start = get_lptim_value();
+//    
+//    // Too close to pending compare match interrupt. Exit vPortSuppressTicksAndSleep    
+//    if( DIFF(pending_match_val, vPSTAS_start) <= 5)
+//    {
+//        __force_stores();
+//        __WFI();
+//        __enable_irq();
+//        LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_5);
 
-        // Check if next and past compare values are 32 ticks apart
-        assert(DIFF(pending_match_val, last_match_val) == 32);
-        return;
-    }
-    
-    /* Set next compare match value to be "Expected Idle" LPTIM counts away from the
-       past compare match value. */
-    temp_match_val = last_match_val + expected_idle_counts;
+//        // Check if next and past compare values are 32 ticks apart
+//        assert(DIFF(pending_match_val, last_match_val) == 32);
+//        return;
+//    }
+//    
+//    /* Set next compare match value to be "Expected Idle" LPTIM counts away from the
+//       past compare match value. */
+//    temp_match_val = last_match_val + expected_idle_counts;
+//    if(temp_match_val < last_match_val) {
+//	    /* disable-> enable LPtimer to reset counter */
+//	    LL_LPTIM_Disable_VM(LPTIM2);
+//	    LL_LPTIM_Enable(LPTIM2);
+//	    set_compare_match(expected_idle_counts);
+//	    LL_LPTIM_StartCounter(LPTIM2, LL_LPTIM_OPERATING_MODE_CONTINUOUS);
+//	    temp_match_val = expected_idle_counts;
+//    }
+//    else
+//	    set_compare_match(temp_match_val);
 
-    set_compare_match(temp_match_val);
-    //LL_LPTIM_SetCompare( LPTIM2, temp_match_val );
-    now_debug = get_lptim_value();
-    
-    /* Make sure the value in the Compare Match Register matches the value we THINK we just wrote */
-    assert(temp_match_val == LL_LPTIM_GetCompare(LPTIM2));
-    assert((pending_match_val % 0x20) == 0);
-    
-    isr_snapshot_before = LPTIM2->ISR;
-    
-    /* Enter STOP1 Mode */
-    sysclk_driver_enter_sleep();
-    
-    isr_snapshot_after = LPTIM2->ISR;
-    assert((pending_match_val % 0x20) == 0);
-    
-    /* Determine if the LPTIM2 Compare Match Interrupt fired or if an interrupt other than the LPTIM2 CM
-    must have brought the system out of sleep mode. */
-    if( LL_LPTIM_IsActiveFlag_CMPM(LPTIM2) )
-    {
-        // Check to make sure NVIC has a pending LPTIM2 IRQ
-        assert( NVIC_GetPendingIRQ(LPTIM2_IRQn) && LL_LPTIM_IsActiveFlag_CMPM(LPTIM2) );
-        LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_9);
-        LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_9);
-        
-        /* Check if the match occured when we think it should have 
-           THIS IS WHERE THE BUG IS. */
-        now_match = get_lptim_value();
-        assert(DIFF( now_match ,temp_match_val) <= 2);
-        
-        /* Debugging */
-//        elapsed_ticks_buf[buf_counter_1++] =  xExpectedIdleTime;
-//        if (buf_counter_1 >= 100)
+//    //LL_LPTIM_SetCompare( LPTIM2, temp_match_val );
+//    now_debug = get_lptim_value();
+//    
+//    /* Make sure the value in the Compare Match Register matches the value we THINK we just wrote */
+//    assert(temp_match_val == LL_LPTIM_GetCompare(LPTIM2));
+//    assert((pending_match_val % 0x20) == 0);
+//    
+//    isr_snapshot_before = LPTIM2->ISR;
+//    
+//    /* Enter STOP1 Mode */
+//    sysclk_driver_enter_sleep();
+//    
+//    isr_snapshot_after = LPTIM2->ISR;
+//    assert((pending_match_val % 0x20) == 0);
+//    
+//    /* Determine if the LPTIM2 Compare Match Interrupt fired or if an interrupt other than the LPTIM2 CM
+//    must have brought the system out of sleep mode. */
+//    if( LL_LPTIM_IsActiveFlag_CMPM(LPTIM2) )
+//    {
+//        // Check to make sure NVIC has a pending LPTIM2 IRQ
+//        assert( NVIC_GetPendingIRQ(LPTIM2_IRQn) && LL_LPTIM_IsActiveFlag_CMPM(LPTIM2) );
+//        LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_9);
+//        LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_9);
+//        
+//        /* Check if the match occured when we think it should have 
+//           THIS IS WHERE THE BUG IS. */
+//        now_match = get_lptim_value();
+//        assert(DIFF( now_match ,temp_match_val) <= 2);
+//        
+//        /* Debugging */
+////        elapsed_ticks_buf[buf_counter_1++] =  xExpectedIdleTime;
+////        if (buf_counter_1 >= 100)
+////        {
+////            buf_counter_1 = 0;
+////        }
+//        
+//        /* Only now update the pending_match_val to the temporary match value */
+//        pending_match_val = temp_match_val;
+//        vTaskStepTick( xExpectedIdleTime - 1UL );         
+//    }
+//    else
+//    {
+//        // ENC_LOW
+//        LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_14);
+//        
+//        /* Get current LPTIM2 count and align it with FreeRTOS Tick (multiple of 32).
+//           We choose to floor the count to the lower value Tick*/
+//        now_async = get_lptim_value();
+//        now_async_aligned = (now_async - (now_async % ulTimerCountsForOneTick));
+//        
+//        elapsed_timer_counts = DIFF(now_async_aligned, last_match_val);
+//        
+//        /* The complete Tick periods is the elapsed timer counts divided by the number of LPTIM2
+//           counts per FreeRTOS tick */
+//        ulCompleteTickPeriods = (elapsed_timer_counts/ulTimerCountsForOneTick);
+//        
+//        //debugging
+//        expected_idle_time = xExpectedIdleTime;
+//        assert(ulCompleteTickPeriods <= expected_idle_time);
+//        assert((pending_match_val % 0x20) == 0);
+
+//        /* The next compare match is set to the next FreeRTOS tick */
+//        temp_match_val = now_async_aligned + ulTimerCountsForOneTick;
+
+//        if( DIFF(temp_match_val, now_async) <= 4 )
 //        {
-//            buf_counter_1 = 0;
+//            if ( ulCompleteTickPeriods >= ( xExpectedIdleTime - 1 ) )
+//            {
+//                last_match_val = temp_match_val - ulTimerCountsForOneTick;
+//                pending_match_val = temp_match_val;
+//                vTaskStepTick( ulCompleteTickPeriods );
+//                LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_14); 
+//                LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_5);
+//                __enable_irq();
+//                
+//                // Check if next and past compare values are 32 ticks apart
+//                assert(DIFF(pending_match_val, last_match_val) == 32);
+//                
+//                return;
+//                
+//            }
+//            else
+//            {
+//                temp_match_val += ulTimerCountsForOneTick;
+//                ulCompleteTickPeriods += 1;
+//            }
 //        }
-        
-        /* Only now update the pending_match_val to the temporary match value */
-        pending_match_val = temp_match_val;
-        vTaskStepTick( xExpectedIdleTime - 1UL );         
-    }
-    else
-    {
-        // ENC_LOW
-        LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_14);
-        
-        /* Get current LPTIM2 count and align it with FreeRTOS Tick (multiple of 32).
-           We choose to floor the count to the lower value Tick*/
-        now_async = get_lptim_value();
-        now_async_aligned = (now_async - (now_async % ulTimerCountsForOneTick));
-        
-        elapsed_timer_counts = DIFF(now_async_aligned, last_match_val);
-        
-        /* The complete Tick periods is the elapsed timer counts divided by the number of LPTIM2
-           counts per FreeRTOS tick */
-        ulCompleteTickPeriods = (elapsed_timer_counts/ulTimerCountsForOneTick);
-        
-        //debugging
-        expected_idle_time = xExpectedIdleTime;
-        assert(ulCompleteTickPeriods <= expected_idle_time);
-        assert((pending_match_val % 0x20) == 0);
-
-        /* The next compare match is set to the next FreeRTOS tick */
-        temp_match_val = now_async_aligned + ulTimerCountsForOneTick;
-
-        if( DIFF(temp_match_val, now_async) <= 4 )
-        {
-            if ( ulCompleteTickPeriods >= ( xExpectedIdleTime - 1 ) )
-            {
-                last_match_val = temp_match_val - ulTimerCountsForOneTick;
-                pending_match_val = temp_match_val;
-                vTaskStepTick( ulCompleteTickPeriods );
-                LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_14); 
-                LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_5);
-                __enable_irq();
-                
-                // Check if next and past compare values are 32 ticks apart
-                assert(DIFF(pending_match_val, last_match_val) == 32);
-                
-                return;
-                
-            }
-            else
-            {
-                temp_match_val += ulTimerCountsForOneTick;
-                ulCompleteTickPeriods += 1;
-            }
-        }
-        
-        last_match_val = temp_match_val - ulTimerCountsForOneTick;
-        pending_match_val = temp_match_val;
-        //LL_LPTIM_SetCompare( LPTIM2, pending_match_val );
-        set_compare_match(pending_match_val);
-        
-//        async_elapsed_ticks_buf[buf_counter_2++] =  ulCompleteTickPeriods;
-//        if (buf_counter_2 >= 100)
-//        {
-//            buf_counter_2 = 0;
-//        }
-        
-        //assert(ulCompleteTickPeriods <= 2047);
-        vTaskStepTick( ulCompleteTickPeriods );
-        
-        // ENC_LOW
-        LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_14); 
-    }
-    
-    // nCS_ACCEL
-    LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_5);
-          
-    /* Exit with interrpts enabled. */
-    __enable_irq();
-}
+//        
+//        last_match_val = temp_match_val - ulTimerCountsForOneTick;
+//        pending_match_val = temp_match_val;
+//        //LL_LPTIM_SetCompare( LPTIM2, pending_match_val );
+//        set_compare_match(pending_match_val);
+//        
+////        async_elapsed_ticks_buf[buf_counter_2++] =  ulCompleteTickPeriods;
+////        if (buf_counter_2 >= 100)
+////        {
+////            buf_counter_2 = 0;
+////        }
+//        
+//        //assert(ulCompleteTickPeriods <= 2047);
+//        vTaskStepTick( ulCompleteTickPeriods );
+//        
+//        // ENC_LOW
+//        LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_14); 
+//    }
+//    
+//    // nCS_ACCEL
+//    LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_5);
+//          
+//    /* Exit with interrpts enabled. */
+//    __enable_irq();
+//}
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, signed char *pcTaskName)
 {
@@ -418,8 +435,8 @@ void tickless_1_task(void *params)
     while(1)
     {
         vTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS(100UL) );
-        LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_0);
-        LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_0);
+        //LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_0);
+        //LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_0);
     }
 }
 
@@ -430,8 +447,8 @@ void tickless_2_task(void *params)
     while(1)
     {
         vTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS(90UL) );
-        LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_1);
-        LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_1);
+        //LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_1);
+        //LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_1);
     }
 }
 
@@ -461,8 +478,8 @@ void tickless_3_task(void *params)
     {
         uint8_t dummy;
         BaseType_t res = xQueueReceive(_task3_event_queue, (void *) &dummy, portMAX_DELAY);
-        LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_11);
-        LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_11);
+        //LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_11);
+        //LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_11);
     }
 }
 
